@@ -1,0 +1,47 @@
+# ---- Private data: must never be committed or published (CLAUDE.md ground rule 3) ----
+# Raw downloads and built indexes live in /data. Only its README is tracked.
+/data/*
+!/data/README.md
+# MIDI files anywhere in the repo, including Zoe's own melodies and test exports.
+*.mid
+*.midi
+*.MID
+*.MIDI
+*.kar
+*.KAR
+# Lakh MIDI Dataset downloads and data derived from them, wherever they end up.
+# (Data file types only, so indexer source code such as build_lakh_index.py stays tracked.)
+lmd_*/
+lmd_*.tar.gz
+*.h5
+match_scores.json
+*[lL]akh*.json
+*[lL]akh*.json.gz
+*[lL]akh*.bin
+*[lL]akh*.csv
+*[lL]akh*.tsv
+*[lL]akh*.sqlite
+*[lL]akh*.npz
+# Reference indexes other than the public domain library (which is web/public/pd-library.json).
+*-index.json
+*-index.json.gz
+*.index.bin
+*.index.gz
+
+# ---- Build output and dependencies ----
+node_modules/
+web/dist/
+*.tsbuildinfo
+
+# ---- Python ----
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ---- Editor and OS ----
+.DS_Store
+.idea/
+*.swp
+.env
+.env.*

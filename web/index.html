@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Melody Overlap Checker</title>
+<meta name="description" content="Check your own melodies for accidental overlap with existing songs, in any key or tempo.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="eyebrow">Pre-release check</span>
+    <h1>Melody Overlap Checker</h1>
+    <p class="lede">Drop in a MIDI export of your melody. The checker compares its shape, the intervals between notes and the rhythm pattern, against a reference library, so a match is found even in a different key or tempo. Results point you to passages worth a listen. They are not a legal opinion.</p>
+  </header>
+
+  <div class="grid">
+    <div class="col">
+      <section class="panel" aria-labelledby="your-h">
+        <div class="panel-head">
+          <h2 id="your-h">Your melody</h2>
+          <span id="example-flag" class="example-flag">Example loaded</span>
+        </div>
+        <div class="drop" id="user-drop">
+          <div>Drag a .mid file here, exported from Logic or Ableton with the melody on its own track.</div>
+          <button class="btn" id="user-pick" type="button">Choose MIDI file</button>
+          <input type="file" id="user-file" accept=".mid,.midi,audio/midi">
+        </div>
+        <div class="row">
+          <label class="small" for="track-select">Melody track</label>
+          <select id="track-select"></select>
+        </div>
+        <div id="user-meta" class="meta"></div>
+        <div id="user-err" class="err" hidden></div>
+        <div class="roll-box"><svg id="overview" class="roll" viewBox="0 0 600 120" role="img" aria-label="Piano roll of your melody"></svg></div>
+        <div class="legend">
+          <span><i class="sw" style="background:var(--accent)"></i>Your notes</span>
+          <span><i class="sw" style="background:var(--match)"></i>Passage with a resemblance</span>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="lib-h">
+        <div class="panel-head">
+          <h2 id="lib-h">Reference library</h2>
+          <span id="lib-count" class="meta"></span>
+        </div>
+        <p class="note">Built in: well-known public domain melodies, useful for catching the "this sounds like a nursery rhyme" cases. Add MIDI files of any song you want to check against. Added files stay in this browser tab only and are not uploaded anywhere.</p>
+        <div class="chips" id="lib-chips"></div>
+        <div class="drop" id="ref-drop">
+          <div>Drag reference .mid files here, as many as you like.</div>
+          <button class="btn ghost" id="ref-pick" type="button">Add reference files</button>
+          <input type="file" id="ref-file" accept=".mid,.midi,audio/midi" multiple>
+        </div>
+        <div id="ref-err" class="err" hidden></div>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="panel" aria-labelledby="res-h">
+        <div class="panel-head">
+          <h2 id="res-h">Resemblances</h2>
+          <div class="summary" id="summary"></div>
+        </div>
+        <div id="results"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="how-h">
+        <h2 id="how-h">How to read the results</h2>
+        <div class="how">
+          <div><h3>Close match</h3><p>At least 8 consecutive intervals line up almost exactly, usually with the same rhythm. Listen to both songs side by side.</p></div>
+          <div><h3>Worth a listen</h3><p>A shorter or looser stretch lines up. Often harmless, but compare by ear before release.</p></div>
+          <div><h3>Passing resemblance</h3><p>Short or mostly stepwise overlap. Scales, repeated notes and simple arpeggios appear in thousands of songs.</p></div>
+        </div>
+        <p class="note">Leaps count for more than steps, because a distinctive leap is what makes a melody recognizable. For a release with real stakes, a forensic musicologist is the right next step.</p>
+      </section>
+    </div>
+  </div>
+</div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
