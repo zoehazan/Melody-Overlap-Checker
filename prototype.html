@@ -1,0 +1,535 @@
+<title>Melody Overlap Checker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a studio work surface. Input column (your melody + library) beside a results column; piano-roll strips carry the evidence. */
+:root {
+  --bg: #f5f4f8;
+  --surface: #ffffff;
+  --fg: #1d1a26;
+  --muted: #625c72;
+  --line: #dedae7;
+  --accent: #5a3d98;
+  --accent-soft: #ece6f8;
+  --match: #c9701c;
+  --match-soft: #fbeedf;
+  --strong: #b23a48;
+  --strong-soft: #f8e3e6;
+  --faint: #8a8499;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14121a; --surface: #1d1a26; --fg: #ece9f3; --muted: #a39db3; --line: #332e40;
+    --accent: #b39cf0; --accent-soft: #2a2340; --match: #f0a45a; --match-soft: #3a2a1a;
+    --strong: #f08a96; --strong-soft: #3d1f25; --faint: #7d7790; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14121a; --surface: #1d1a26; --fg: #ece9f3; --muted: #a39db3; --line: #332e40;
+  --accent: #b39cf0; --accent-soft: #2a2340; --match: #f0a45a; --match-soft: #3a2a1a;
+  --strong: #f08a96; --strong-soft: #3d1f25; --faint: #7d7790; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; line-height: 1.55;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 56px;
+}
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 28px; }
+header { display: grid; gap: 8px; }
+h1 { font-family: var(--display); font-weight: 700; font-size: clamp(28px, 4.2vw, 40px); line-height: 1.08; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+h2 { font-family: var(--display); font-weight: 600; font-size: 19px; margin: 0; text-wrap: balance; }
+h3 { font-family: var(--display); font-weight: 600; font-size: 17px; margin: 0; }
+.lede { color: var(--muted); max-width: 68ch; margin: 0; }
+.eyebrow { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 24px; align-items: start; }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.col { display: grid; gap: 20px; min-width: 0; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 14px; min-width: 0; }
+.panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.drop {
+  border: 1.5px dashed var(--line); border-radius: 8px; padding: 18px; text-align: center; color: var(--muted);
+  display: grid; gap: 8px; justify-items: center; transition: border-color .15s, background .15s;
+}
+.drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.btn {
+  font: 600 14px/1 var(--body); border-radius: 7px; padding: 10px 14px; cursor: pointer;
+  border: 1px solid var(--accent); background: var(--accent); color: var(--surface);
+}
+.btn.ghost { background: transparent; color: var(--accent); }
+.btn:focus-visible, select:focus-visible, .chip:focus-visible { outline: 2px solid var(--match); outline-offset: 2px; }
+input[type=file] { display: none; }
+.meta { font-family: var(--mono); font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+label.small { font-size: 13px; color: var(--muted); }
+select { font: 14px var(--body); padding: 7px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); max-width: 100%; }
+.roll { width: 100%; height: auto; display: block; }
+.roll-box { overflow-x: auto; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 12.5px; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--bg); }
+.chip.user { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.example-flag { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; padding: 3px 7px; border-radius: 4px; background: var(--match-soft); color: var(--match); }
+.summary { display: flex; gap: 10px; flex-wrap: wrap; }
+.pill { font-size: 13px; padding: 5px 10px; border-radius: 999px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pill.strong { background: var(--strong-soft); color: var(--strong); }
+.pill.listen { background: var(--match-soft); color: var(--match); }
+.pill.faint { background: var(--bg); color: var(--faint); border: 1px solid var(--line); }
+.match { border-top: 1px solid var(--line); padding-top: 14px; display: grid; gap: 10px; }
+.match:first-of-type { border-top: 0; padding-top: 0; }
+.match-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+.stat { display: grid; gap: 2px; }
+.stat b { font-family: var(--mono); font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stat span { font-size: 12px; color: var(--muted); }
+.note { font-size: 13px; color: var(--muted); margin: 0; }
+.legend { display: flex; gap: 14px; font-size: 12.5px; color: var(--muted); flex-wrap: wrap; }
+.sw { display: inline-block; width: 18px; height: 8px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+.faint-list { margin: 10px 0 0; padding-left: 18px; color: var(--muted); font-size: 13.5px; }
+.empty { color: var(--muted); font-size: 14px; }
+.how { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.how p { margin: 4px 0 0; font-size: 14px; color: var(--muted); }
+.err { color: var(--strong); font-size: 13.5px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow">Pre-release check</span>
+    <h1>Melody Overlap Checker</h1>
+    <p class="lede">Drop in a MIDI export of your melody. The checker compares its shape, the intervals between notes and the rhythm pattern, against a reference library, so a match is found even in a different key or tempo. Results point you to passages worth a listen. They are not a legal opinion.</p>
+  </header>
+
+  <div class="grid">
+    <div class="col">
+      <section class="panel" aria-labelledby="your-h">
+        <div class="panel-head">
+          <h2 id="your-h">Your melody</h2>
+          <span id="example-flag" class="example-flag">Example loaded</span>
+        </div>
+        <div class="drop" id="user-drop">
+          <div>Drag a .mid file here, exported from Logic or Ableton with the melody on its own track.</div>
+          <button class="btn" id="user-pick" type="button">Choose MIDI file</button>
+          <input type="file" id="user-file" accept=".mid,.midi,audio/midi">
+        </div>
+        <div class="row">
+          <label class="small" for="track-select">Melody track</label>
+          <select id="track-select"></select>
+        </div>
+        <div id="user-meta" class="meta"></div>
+        <div id="user-err" class="err" hidden></div>
+        <div class="roll-box"><svg id="overview" class="roll" viewBox="0 0 600 120" role="img" aria-label="Piano roll of your melody"></svg></div>
+        <div class="legend">
+          <span><i class="sw" style="background:var(--accent)"></i>Your notes</span>
+          <span><i class="sw" style="background:var(--match)"></i>Passage with a resemblance</span>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="lib-h">
+        <div class="panel-head">
+          <h2 id="lib-h">Reference library</h2>
+          <span id="lib-count" class="meta"></span>
+        </div>
+        <p class="note">Built in: well-known public domain melodies, useful for catching the "this sounds like a nursery rhyme" cases. Add MIDI files of any song you want to check against. Added files stay in this browser tab only and are not uploaded anywhere.</p>
+        <div class="chips" id="lib-chips"></div>
+        <div class="drop" id="ref-drop">
+          <div>Drag reference .mid files here, as many as you like.</div>
+          <button class="btn ghost" id="ref-pick" type="button">Add reference files</button>
+          <input type="file" id="ref-file" accept=".mid,.midi,audio/midi" multiple>
+        </div>
+        <div id="ref-err" class="err" hidden></div>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="panel" aria-labelledby="res-h">
+        <div class="panel-head">
+          <h2 id="res-h">Resemblances</h2>
+          <div class="summary" id="summary"></div>
+        </div>
+        <div id="results"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="how-h">
+        <h2 id="how-h">How to read the results</h2>
+        <div class="how">
+          <div><h3>Close match</h3><p>At least 8 consecutive intervals line up almost exactly, usually with the same rhythm. Listen to both songs side by side.</p></div>
+          <div><h3>Worth a listen</h3><p>A shorter or looser stretch lines up. Often harmless, but compare by ear before release.</p></div>
+          <div><h3>Passing resemblance</h3><p>Short or mostly stepwise overlap. Scales, repeated notes and simple arpeggios appear in thousands of songs.</p></div>
+        </div>
+        <p class="note">Leaps count for more than steps, because a distinctive leap is what makes a melody recognizable. For a release with real stakes, a forensic musicologist is the right next step.</p>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+"use strict";
+
+/* ---------- Note helpers ---------- */
+const NAMES = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
+function pitchOf(s) {
+  const m = /^([A-G])([#b]?)(-?\d)$/.exec(s);
+  let p = NAMES[m[1]] + (m[2] === "#" ? 1 : m[2] === "b" ? -1 : 0);
+  return p + (parseInt(m[3], 10) + 1) * 12;
+}
+function seqFromText(txt) {
+  let t = 0; const notes = [];
+  for (const tok of txt.trim().split(/\s+/)) {
+    const [n, d] = tok.split(":");
+    const dur = d ? parseFloat(d) : 1;
+    notes.push({ pitch: pitchOf(n), start: t, dur });
+    t += dur;
+  }
+  return notes;
+}
+
+/* ---------- Built-in public domain library ---------- */
+const PD = [
+  ["Twinkle, Twinkle, Little Star", "Traditional", "C4 C4 G4 G4 A4 A4 G4:2 F4 F4 E4 E4 D4 D4 C4:2 G4 G4 F4 F4 E4 E4 D4:2 G4 G4 F4 F4 E4 E4 D4:2 C4 C4 G4 G4 A4 A4 G4:2 F4 F4 E4 E4 D4 D4 C4:2"],
+  ["Ode to Joy", "Beethoven, 1824", "E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 E4:1.5 D4:0.5 D4:2 E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 D4:1.5 C4:0.5 C4:2 D4 D4 E4 C4 D4 E4:0.5 F4:0.5 E4 C4 D4 E4:0.5 F4:0.5 E4 D4 C4 D4 G3:2"],
+  ["Frère Jacques", "Traditional", "C4 D4 E4 C4 C4 D4 E4 C4 E4 F4 G4:2 E4 F4 G4:2 G4:0.5 A4:0.5 G4:0.5 F4:0.5 E4 C4 G4:0.5 A4:0.5 G4:0.5 F4:0.5 E4 C4 C4 G3 C4:2 C4 G3 C4:2"],
+  ["Mary Had a Little Lamb", "Traditional", "E4 D4 C4 D4 E4 E4 E4:2 D4 D4 D4:2 E4 G4 G4:2 E4 D4 C4 D4 E4 E4 E4 E4 D4 D4 E4 D4 C4:4"],
+  ["Amazing Grace", "Traditional, 1835 tune", "D4 G4:2 B4:0.5 G4:0.5 B4:2 A4 G4:2 E4 D4:2 D4 G4:2 B4:0.5 G4:0.5 B4:2 A4 D5:3 B4 D5:1.5 B4:0.5 D5:0.5 B4:0.5 G4:2 D4 E4:1.5 G4:0.5 G4:0.5 E4:0.5 D4:2 D4 G4:2 B4:0.5 G4:0.5 B4:2 A4 G4:3"],
+  ["Jingle Bells", "Pierpont, 1857", "E4 E4 E4:2 E4 E4 E4:2 E4 G4 C4:1.5 D4:0.5 E4:4 F4 F4 F4:1.5 F4:0.5 F4 E4 E4 E4:0.5 E4:0.5 E4 D4 D4 E4 D4:2 G4:2"],
+  ["Yankee Doodle", "Traditional", "C4 C4 D4 E4 C4 E4 D4 G3 C4 C4 D4 E4 C4:2 B3:2 C4 C4 D4 E4 F4 E4 D4 C4 B3 G3 A3 B3 C4:2 C4:2"],
+  ["Brahms' Lullaby", "Brahms, 1868", "E4:0.5 E4:0.5 G4:2 E4:0.5 E4:0.5 G4:2 E4:0.5 G4:0.5 C5 B4:1.5 A4:0.5 A4 G4 D4:0.5 E4:0.5 F4 D4 D4:0.5 E4:0.5 F4:2 D4:0.5 F4:0.5 B4:0.5 A4:0.5 G4 B4 C5:2"],
+  ["Auld Lang Syne", "Traditional", "G3 C4:1.5 C4:0.5 C4 E4 D4:1.5 C4:0.5 D4 E4:0.5 D4:0.5 C4:1.5 C4:0.5 E4 G4 A4:3 A4 G4:1.5 E4:0.5 E4 C4 D4:1.5 C4:0.5 D4 E4:0.5 D4:0.5 C4:1.5 A3:0.5 A3 G3 C4:3"],
+  ["Oh! Susanna", "Foster, 1848", "C4:0.5 D4:0.5 E4 G4 G4:1.5 A4:0.5 G4 E4 C4:1.5 D4:0.5 E4 E4 D4 C4 D4:3 C4:0.5 D4:0.5 E4 G4 G4:1.5 A4:0.5 G4 E4 C4:1.5 D4:0.5 E4 E4 D4 D4 C4:3"],
+  ["When the Saints Go Marching In", "Traditional", "C4 E4 F4 G4:4 C4 E4 F4 G4:4 C4 E4 F4 G4:2 E4:2 C4:2 E4:2 D4:3 E4 E4 D4 C4:3 C4 E4 G4 G4:2 F4:3 E4 F4 G4:2 E4:2 C4:2 D4:2 C4:4"],
+  ["Greensleeves", "Traditional", "A4:0.5 C5 D5:0.5 E5:0.75 F5:0.25 E5:0.5 D5 B4:0.5 G4:0.75 A4:0.25 B4:0.5 C5 A4:0.5 A4:0.75 G#4:0.25 A4:0.5 B4 G#4:0.5 E4 A4:0.5 C5 D5:0.5 E5:0.75 F5:0.25 E5:0.5 D5 B4:0.5 G4:0.75 A4:0.25 B4:0.5 C5:0.75 B4:0.25 A4:0.5 G#4:0.75 F#4:0.25 G#4:0.5 A4:1.5"],
+  ["Happy Birthday to You", "Hill sisters, public domain", "G4:0.75 G4:0.25 A4 G4 C5 B4:2 G4:0.75 G4:0.25 A4 G4 D5 C5:2 G4:0.75 G4:0.25 G5 E5 C5 B4 A4:2 F5:0.75 F5:0.25 E5 C5 D5 C5:2"],
+];
+
+/* Example "your song": original material in A major with Ode to Joy's opening contour borrowed mid-phrase in a new rhythm. */
+const EXAMPLE = seqFromText(
+  "A4 E5:1.5 D5:0.5 C#5 B4 A4:2 F#4 G#4 A4:2 " +
+  "C#5:0.5 C#5:0.5 D5:0.5 E5:0.5 E5 D5:0.5 C#5:0.5 B4 A4:0.5 A4:0.5 B4:0.5 C#5:0.5 C#5:1.5 B4:0.5 B4:2 " +
+  "E5 F#5 E5 C#5 A4:2 B4 C#5 A4:4"
+);
+
+/* ---------- Fingerprint encoding ---------- */
+// Interval: semitones to next note (key-independent). Rhythm: log2 ratio of this gap to the previous one (tempo-independent).
+function encode(notes) {
+  const iv = [], rh = [];
+  for (let k = 0; k < notes.length - 1; k++) {
+    let d = notes[k + 1].pitch - notes[k].pitch;
+    while (d > 12) d -= 12; while (d < -12) d += 12;
+    iv.push(d);
+    const ioi = Math.max(1e-3, notes[k + 1].start - notes[k].start);
+    if (k === 0) rh.push(0);
+    else {
+      const prev = Math.max(1e-3, notes[k].start - notes[k - 1].start);
+      rh.push(Math.max(-3, Math.min(3, Math.round(Math.log2(ioi / prev)))));
+    }
+  }
+  return { iv, rh };
+}
+
+/* ---------- Local alignment (Smith-Waterman) ---------- */
+const GAP = -2;
+function weight(x) { const a = Math.abs(x); return a === 0 ? 1 : a <= 2 ? 1.5 : 3; }
+function align(A, B) {
+  const n = A.iv.length, m = B.iv.length;
+  if (!n || !m) return null;
+  const W = m + 1;
+  const H = new Float32Array((n + 1) * W);
+  const T = new Uint8Array((n + 1) * W); // 0 stop, 1 diag, 2 up, 3 left
+  let best = 0, bi = 0, bj = 0;
+  for (let i = 1; i <= n; i++) {
+    const a = A.iv[i - 1], ar = A.rh[i - 1];
+    for (let j = 1; j <= m; j++) {
+      const b = B.iv[j - 1];
+      let s;
+      if (a === b) s = weight(a) + (ar === B.rh[j - 1] ? 1 : 0);
+      else if (Math.abs(a - b) === 1) s = -0.5;
+      else s = -2;
+      const d = H[(i - 1) * W + j - 1] + s, u = H[(i - 1) * W + j] + GAP, l = H[i * W + j - 1] + GAP;
+      let v = 0, t = 0;
+      if (d > v) { v = d; t = 1; }
+      if (u > v) { v = u; t = 2; }
+      if (l > v) { v = l; t = 3; }
+      H[i * W + j] = v; T[i * W + j] = t;
+      if (v > best) { best = v; bi = i; bj = j; }
+    }
+  }
+  if (best <= 0) return null;
+  let i = bi, j = bj, cols = 0, exact = 0, rhythmSame = 0, leaps = 0;
+  while (i > 0 && j > 0 && T[i * W + j] !== 0) {
+    const t = T[i * W + j];
+    cols++;
+    if (t === 1) {
+      if (A.iv[i - 1] === B.iv[j - 1]) {
+        exact++;
+        if (A.rh[i - 1] === B.rh[j - 1]) rhythmSame++;
+        if (Math.abs(A.iv[i - 1]) >= 3) leaps++;
+      }
+      i--; j--;
+    } else if (t === 2) i--; else j--;
+  }
+  return { score: best, uStart: i, uEnd: bi, rStart: j, rEnd: bj, cols, exact,
+           identity: exact / cols, rhythm: exact ? rhythmSame / exact : 0, leaps };
+}
+function classify(r) {
+  let level = 0;
+  if (r.exact >= 8 && r.identity >= 0.85 && r.rhythm >= 0.5) level = 2;
+  else if (r.exact >= 6 && r.identity >= 0.75) level = 1;
+  const stepwise = r.leaps === 0 && r.exact < 10 && level > 0;
+  if (stepwise) level--;
+  return { level, stepwise };
+}
+
+/* ---------- Minimal MIDI parser ---------- */
+function parseMidi(buf) {
+  const d = new DataView(buf); let p = 0;
+  const str = (n) => { let s = ""; for (let k = 0; k < n; k++) s += String.fromCharCode(d.getUint8(p + k)); p += n; return s; };
+  const u32 = () => { const v = d.getUint32(p); p += 4; return v; };
+  const u16 = () => { const v = d.getUint16(p); p += 2; return v; };
+  if (str(4) !== "MThd") throw new Error("This file is not a standard MIDI file.");
+  const hlen = u32(); u16(); const ntrk = u16(); const div = u16(); p += hlen - 6;
+  if (div & 0x8000) throw new Error("This MIDI uses SMPTE timing, which is not supported yet.");
+  let tsNum = 4, tsDen = 4;
+  const tracks = [];
+  for (let t = 0; t < ntrk && p < d.byteLength - 8; t++) {
+    const id = str(4), len = u32(), end = p + len;
+    if (id !== "MTrk") { p = end; continue; }
+    let tick = 0, status = 0, name = "";
+    const open = {}, notes = [], chans = new Set();
+    const vlq = () => { let v = 0, b; do { b = d.getUint8(p++); v = (v << 7) | (b & 0x7f); } while (b & 0x80); return v; };
+    while (p < end) {
+      tick += vlq();
+      let b = d.getUint8(p);
+      if (b & 0x80) { status = b; p++; }
+      if (status === 0xff) {
+        const type = d.getUint8(p++), l = vlq();
+        if (type === 0x03) { name = ""; for (let k = 0; k < l; k++) name += String.fromCharCode(d.getUint8(p + k)); }
+        if (type === 0x58 && l >= 2) { tsNum = d.getUint8(p); tsDen = 2 ** d.getUint8(p + 1); }
+        p += l;
+      } else if (status === 0xf0 || status === 0xf7) { p += vlq(); }
+      else {
+        const hi = status & 0xf0, ch = status & 0x0f;
+        const a = d.getUint8(p++); const two = hi !== 0xc0 && hi !== 0xd0; const v = two ? d.getUint8(p++) : 0;
+        const key = ch * 128 + a;
+        if (hi === 0x90 && v > 0) { (open[key] ||= []).push(tick); chans.add(ch); }
+        else if (hi === 0x80 || (hi === 0x90 && v === 0)) {
+          const st = open[key] && open[key].shift();
+          if (st !== undefined) notes.push({ pitch: a, start: st / div, dur: Math.max(0.01, (tick - st) / div), ch });
+        }
+      }
+    }
+    p = end;
+    if (notes.length) tracks.push({ name: name.trim() || `Track ${t + 1}`, notes: notes.sort((x, y) => x.start - y.start || y.pitch - x.pitch), drums: chans.has(9) && chans.size === 1 });
+  }
+  return { tracks: tracks.filter(t => !t.drums), beatsPerBar: tsNum * (4 / tsDen) };
+}
+// Keep the top note at each onset and trim overlaps, so chords reduce to a single melodic line.
+function skyline(notes) {
+  const out = [];
+  for (const n of notes) {
+    const last = out[out.length - 1];
+    if (last && Math.abs(n.start - last.start) < 0.06) { if (n.pitch > last.pitch) out[out.length - 1] = { ...n }; continue; }
+    out.push({ ...n });
+  }
+  for (let k = 0; k < out.length - 1; k++) out[k].dur = Math.min(out[k].dur, out[k + 1].start - out[k].start);
+  return out;
+}
+function trackScore(t) {
+  const nm = t.name.toLowerCase();
+  let s = /melod|vocal|vox|lead|voice|sing|tune/.test(nm) ? 3 : 0;
+  if (/bass|drum|perc|pad|chord|string/.test(nm)) s -= 2;
+  const sky = skyline(t.notes);
+  s += (sky.length / t.notes.length) * 2;
+  const mean = sky.reduce((a, n) => a + n.pitch, 0) / sky.length;
+  if (mean >= 57 && mean <= 84) s += 1.5;
+  if (sky.length < 12) s -= 3;
+  return s;
+}
+function pickMelody(parsed) {
+  if (!parsed.tracks.length) throw new Error("No notes found in this file.");
+  let best = 0, bs = -1e9;
+  parsed.tracks.forEach((t, i) => { const s = trackScore(t); if (s > bs) { bs = s; best = i; } });
+  return best;
+}
+
+/* ---------- State ---------- */
+const library = PD.map(([title, credit, txt]) => ({ title, credit, builtin: true, fp: encode(seqFromText(txt)) }));
+const state = { notes: EXAMPLE, beatsPerBar: 4, parsed: null, example: true, fileName: "Example melody" };
+
+/* ---------- Rendering ---------- */
+const $ = (id) => document.getElementById(id);
+const SVGNS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent) { const e = document.createElementNS(SVGNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+function drawRoll(svg, layers, opts = {}) {
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const all = layers.flatMap(l => l.notes);
+  if (!all.length) return;
+  const W = opts.width || 600, H = opts.height || 120, pad = 8;
+  const t0 = Math.min(...all.map(n => n.start)), t1 = Math.max(...all.map(n => n.start + n.dur));
+  const p0 = Math.min(...all.map(n => n.pitch)) - 1, p1 = Math.max(...all.map(n => n.pitch)) + 1;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const x = (t) => pad + ((t - t0) / Math.max(1e-6, t1 - t0)) * (W - pad * 2);
+  const rowH = (H - pad * 2) / (p1 - p0 + 1);
+  const y = (p) => pad + (p1 - p) * rowH;
+  if (opts.bars) {
+    for (let b = Math.ceil(t0 / opts.bars) * opts.bars; b <= t1; b += opts.bars)
+      el("line", { x1: x(b), x2: x(b), y1: pad, y2: H - pad, stroke: "var(--line)", "stroke-width": 1 }, svg);
+  }
+  for (const r of opts.spans || []) el("rect", { x: x(r.a), y: pad - 4, width: Math.max(2, x(r.b) - x(r.a)), height: H - pad * 2 + 8, fill: "var(--match-soft)", rx: 3 }, svg);
+  for (const l of layers) for (const n of l.notes) {
+    el("rect", { x: x(n.start), y: y(n.pitch) + rowH * 0.12, width: Math.max(2, x(n.start + n.dur) - x(n.start) - 1.5), height: Math.max(2, rowH * 0.76), rx: 1.5,
+      fill: l.outline ? "none" : (n.hi ? "var(--match)" : l.color), stroke: l.outline ? l.color : "none", "stroke-width": l.outline ? 1.5 : 0 }, svg);
+  }
+}
+
+function rebuildRef(lib, r, userNotes) {
+  // Rebuild the reference passage from its fingerprint, transposed to start on your note and laid on your note timings so pitches compare directly.
+  let pitch = userNotes[r.uStart].pitch;
+  const out = [];
+  const count = r.rEnd - r.rStart + 1;
+  for (let k = 0; k < count; k++) {
+    const u = userNotes[Math.min(r.uStart + k, userNotes.length - 1)];
+    out.push({ pitch, start: u.start, dur: u.dur });
+    if (k < count - 1) pitch += lib.fp.iv[r.rStart + k];
+  }
+  return out;
+}
+
+function renderLibrary() {
+  const chips = $("lib-chips"); chips.innerHTML = "";
+  for (const l of library) {
+    const c = document.createElement("span"); c.className = "chip" + (l.builtin ? "" : " user");
+    c.textContent = l.title; c.title = l.credit; chips.appendChild(c);
+  }
+  const added = library.filter(l => !l.builtin).length;
+  $("lib-count").textContent = `${library.length} melodies` + (added ? ` · ${added} added` : "");
+}
+
+function renderTracks() {
+  const sel = $("track-select"); sel.innerHTML = "";
+  if (!state.parsed) { const o = new Option("Example melody (single line)", "0"); sel.appendChild(o); sel.disabled = true; return; }
+  sel.disabled = false;
+  state.parsed.tracks.forEach((t, i) => sel.appendChild(new Option(`${t.name} · ${t.notes.length} notes`, String(i))));
+  sel.value = String(state.trackIndex);
+}
+
+function analyze() {
+  const notes = state.notes;
+  const fp = encode(notes);
+  const bars = (beat) => Math.floor(beat / state.beatsPerBar) + 1;
+  $("example-flag").hidden = !state.example;
+  $("user-meta").textContent = `${state.fileName} · ${notes.length} notes · ${bars(notes[notes.length - 1].start)} bars`;
+
+  const results = [];
+  for (const lib of library) {
+    const r = align(fp, lib.fp);
+    if (!r || r.exact < 4) continue;
+    const c = classify(r);
+    results.push({ lib, r, ...c });
+  }
+  results.sort((a, b) => b.level - a.level || b.r.score - a.r.score);
+
+  const strong = results.filter(x => x.level === 2), listen = results.filter(x => x.level === 1), faint = results.filter(x => x.level === 0);
+  $("summary").innerHTML =
+    `<span class="pill strong">${strong.length} close</span><span class="pill listen">${listen.length} worth a listen</span><span class="pill faint">${faint.length} passing</span>`;
+
+  const spans = [...strong, ...listen].map(x => ({ a: notes[x.r.uStart].start, b: notes[x.r.uEnd].start + notes[x.r.uEnd].dur }));
+  const hiSet = new Set();
+  for (const x of [...strong, ...listen]) for (let k = x.r.uStart; k <= x.r.uEnd; k++) hiSet.add(k);
+  drawRoll($("overview"), [{ notes: notes.map((n, k) => ({ ...n, hi: hiSet.has(k) })), color: "var(--accent)" }], { spans, bars: state.beatsPerBar, height: 130 });
+
+  const box = $("results"); box.innerHTML = "";
+  const flagged = [...strong, ...listen];
+  if (!flagged.length) {
+    const p = document.createElement("p"); p.className = "empty";
+    p.textContent = `No close or notable resemblances against the ${library.length} melodies in the library. That only covers this library, so also hum the hook into Google's "Hum to Search" or SoundHound for a much wider check.`;
+    box.appendChild(p);
+  }
+  for (const x of flagged.slice(0, 8)) {
+    const n = notes, r = x.r;
+    const div = document.createElement("article"); div.className = "match";
+    const label = x.level === 2 ? '<span class="pill strong">Close match</span>' : '<span class="pill listen">Worth a listen</span>';
+    div.innerHTML = `
+      <div class="match-head"><div><h3>${esc(x.lib.title)}</h3><div class="meta">${esc(x.lib.credit)}</div></div>${label}</div>
+      <div class="stats">
+        <div class="stat"><b>Bars ${bars(n[r.uStart].start)}–${bars(n[r.uEnd].start)}</b><span>in your melody</span></div>
+        <div class="stat"><b>${r.exact + 1} notes</b><span>matching run</span></div>
+        <div class="stat"><b>${Math.round(r.identity * 100)}%</b><span>intervals identical</span></div>
+        <div class="stat"><b>${Math.round(r.rhythm * 100)}%</b><span>rhythm agrees</span></div>
+      </div>`;
+    const rb = document.createElement("div"); rb.className = "roll-box";
+    const svg = el("svg", { class: "roll", role: "img", "aria-label": `Your passage compared with ${x.lib.title}` });
+    rb.appendChild(svg); div.appendChild(rb);
+    const userPart = n.slice(r.uStart, r.uEnd + 1);
+    drawRoll(svg, [{ notes: userPart, color: "var(--accent)" }, { notes: rebuildRef(x.lib, r, n), color: "var(--match)", outline: true }], { height: 110 });
+    const leg = document.createElement("div"); leg.className = "legend";
+    leg.innerHTML = `<span><i class="sw" style="background:var(--accent)"></i>Your passage</span><span><i class="sw" style="border:1.5px solid var(--match)"></i>${esc(x.lib.title)}, moved to your key and lined up note by note</span>`;
+    div.appendChild(leg);
+    if (x.stepwise) { const p = document.createElement("p"); p.className = "note"; p.textContent = "This stretch moves only by steps, which is common in many songs, so it was rated one level lower."; div.appendChild(p); }
+    box.appendChild(div);
+  }
+  if (faint.length) {
+    const det = document.createElement("details");
+    det.innerHTML = `<summary>${faint.length} passing resemblance${faint.length > 1 ? "s" : ""}, likely common patterns</summary>` +
+      `<ul class="faint-list">${faint.slice(0, 30).map(x => `<li>${esc(x.lib.title)}: ${x.r.exact + 1} notes around bar ${bars(notes[x.r.uStart].start)}</li>`).join("")}</ul>`;
+    box.appendChild(det);
+  }
+}
+
+/* ---------- Input handling ---------- */
+function showErr(id, msg) { const e = $(id); e.textContent = msg || ""; e.hidden = !msg; }
+async function loadUser(file) {
+  showErr("user-err", "");
+  try {
+    const parsed = parseMidi(await file.arrayBuffer());
+    const idx = pickMelody(parsed);
+    state.parsed = parsed; state.trackIndex = idx; state.beatsPerBar = parsed.beatsPerBar;
+    state.notes = skyline(parsed.tracks[idx].notes); state.example = false; state.fileName = file.name;
+    if (state.notes.length < 6) throw new Error("That track has too few notes to compare. Pick another track.");
+    renderTracks(); analyze();
+  } catch (e) { showErr("user-err", `Could not read ${file.name}. ${e.message}`); }
+}
+async function loadRefs(files) {
+  showErr("ref-err", "");
+  const bad = [];
+  for (const f of files) {
+    try {
+      const parsed = parseMidi(await f.arrayBuffer());
+      const sky = skyline(parsed.tracks[pickMelody(parsed)].notes);
+      if (sky.length < 6) throw new Error("too few notes");
+      library.push({ title: f.name.replace(/\.midi?$/i, ""), credit: "Added by you", builtin: false, fp: encode(sky) });
+    } catch (e) { bad.push(f.name); }
+  }
+  if (bad.length) showErr("ref-err", `Skipped ${bad.length} file${bad.length > 1 ? "s" : ""} with no readable melody: ${bad.slice(0, 5).join(", ")}${bad.length > 5 ? "…" : ""}`);
+  renderLibrary(); analyze();
+}
+function wireDrop(zoneId, onFiles) {
+  const z = $(zoneId);
+  z.addEventListener("dragover", (e) => { e.preventDefault(); z.classList.add("over"); });
+  z.addEventListener("dragleave", () => z.classList.remove("over"));
+  z.addEventListener("drop", (e) => { e.preventDefault(); z.classList.remove("over"); const fs = [...e.dataTransfer.files]; if (fs.length) onFiles(fs); });
+}
+$("user-pick").addEventListener("click", () => $("user-file").click());
+$("ref-pick").addEventListener("click", () => $("ref-file").click());
+$("user-file").addEventListener("change", (e) => { if (e.target.files[0]) loadUser(e.target.files[0]); e.target.value = ""; });
+$("ref-file").addEventListener("change", (e) => { if (e.target.files.length) loadRefs([...e.target.files]); e.target.value = ""; });
+wireDrop("user-drop", (fs) => loadUser(fs[0]));
+wireDrop("ref-drop", loadRefs);
+$("track-select").addEventListener("change", (e) => {
+  if (!state.parsed) return;
+  state.trackIndex = +e.target.value; state.notes = skyline(state.parsed.tracks[state.trackIndex].notes);
+  if (state.notes.length < 6) { showErr("user-err", "That track has too few notes to compare."); return; }
+  showErr("user-err", ""); analyze();
+});
+
+renderLibrary(); renderTracks(); analyze();
+})();
+</script>
