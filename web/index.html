@@ -49,6 +49,14 @@
         </div>
         <p class="note">Built in: public domain melodies, from well-known tunes that catch the "this sounds like a nursery rhyme" cases to classical pieces published before 1931. It does not cover modern pop. Add MIDI files of any song you want to check against. Added files stay in this browser tab only and are not uploaded anywhere.</p>
         <ul class="sources" id="lib-sources" aria-label="Library sources"></ul>
+        <div class="private">
+          <div class="row">
+            <button class="btn ghost" id="index-pick" type="button">Load reference index</button>
+            <input type="file" id="index-file" accept=".gz,.json,application/gzip,application/json">
+            <span id="index-status" class="meta"></span>
+          </div>
+          <p class="note">For a private index you built yourself, such as <code>data/index/lakh-index.json.gz</code>. It is read in this tab only, never uploaded, and forgotten when you close the tab.</p>
+        </div>
         <div class="chips" id="lib-chips"></div>
         <div class="drop" id="ref-drop">
           <div>Drag reference .mid files here, as many as you like.</div>
@@ -65,6 +73,7 @@
           <h2 id="res-h">Resemblances</h2>
           <div class="summary" id="summary"></div>
         </div>
+        <div id="search-meta" class="meta"></div>
         <div id="results"></div>
       </section>
 

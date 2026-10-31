@@ -1,8 +1,7 @@
 /* Rendering for the three panels: your melody, the reference library and the results. */
-import type { Alignment } from "../align";
-import type { LibraryEntry, LibraryManifest } from "../library";
+import type { EngineHit, EntryInfo, SearchReply } from "../engine";
+import type { LibraryManifest } from "../library";
 import type { Note, ParsedMidi } from "../midi";
-import type { Hit } from "../search";
 import { $, el, esc } from "./dom";
 import { drawRoll } from "./roll";
 
@@ -10,12 +9,20 @@ const fmt = (n: number) => n.toLocaleString("en-US");
 const link = (text: string, url: string | null | undefined) =>
   url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(text)}</a>` : esc(text);
 
+export interface LibraryView {
+  manifest: LibraryManifest | null;
+  /** Folder that pd-library.json was loaded from, for the credits link. */
+  base: string;
+  /** A private index loaded from a file in this tab, if any. */
+  privateIndex: { name: string; credit: string; count: number } | null;
+  added: EntryInfo[];
+}
+
 /**
  * The library panel: built-in sources with their size, license and credit (as each source's
- * terms require), then a chip per file added in this tab.
- * `base` is the folder that pd-library.json was loaded from, for the credits link.
+ * terms require), the private index if one is loaded, then a chip per file added in this tab.
  */
-export function renderLibrary(library: LibraryEntry[], manifest: LibraryManifest | null, base: string): void {
+export function renderLibrary({ manifest, base, privateIndex, added }: LibraryView): void {
   const list = $("lib-sources");
   list.innerHTML = "";
   for (const s of manifest?.sources ?? []) {
@@ -29,18 +36,24 @@ export function renderLibrary(library: LibraryEntry[], manifest: LibraryManifest
     li.innerHTML = `<span class="meta">${link("Credits for every built-in melody", base + manifest.credits)}</span>`;
     list.appendChild(li);
   }
+  if (privateIndex) {
+    const li = document.createElement("li");
+    li.innerHTML = `<span>${esc(privateIndex.name)}</span><span class="meta">${fmt(privateIndex.count)} · private, this tab only</span>`;
+    li.title = privateIndex.credit;
+    list.appendChild(li);
+  }
 
   const chips = $("lib-chips");
   chips.innerHTML = "";
-  for (const l of library.filter((x) => !x.builtin)) {
+  for (const l of added) {
     const c = document.createElement("span");
     c.className = "chip user";
     c.textContent = l.title;
     c.title = l.credit;
     chips.appendChild(c);
   }
-  const added = library.filter((l) => !l.builtin).length;
-  $("lib-count").textContent = `${fmt(library.length)} melodies` + (added ? ` · ${added} added` : "");
+  const total = (manifest?.total ?? 0) + (privateIndex?.count ?? 0) + added.length;
+  $("lib-count").textContent = `${fmt(total)} melodies` + (added.length ? ` · ${added.length} added` : "");
 }
 
 /** The track dropdown. With no parsed file, shows the built-in example as a single fixed option. */
@@ -61,15 +74,17 @@ export function renderTracks(parsed: ParsedMidi | null, trackIndex: number): voi
  * Rebuild the reference passage from its fingerprint, transposed to start on your note and laid
  * on your note timings so pitches compare directly. The library has no notes, only intervals,
  * so this is the only way to draw it, and it shows exactly what the matcher compared.
+ * hit.refIv holds the reference's intervals from the start of the matched passage.
  */
-export function rebuildRef(lib: LibraryEntry, r: Alignment, userNotes: Note[]): Note[] {
+export function rebuildRef(hit: EngineHit, userNotes: Note[]): Note[] {
+  const r = hit.r;
   let pitch = userNotes[r.uStart].pitch;
   const out: Note[] = [];
   const count = r.rEnd - r.rStart + 1;
   for (let k = 0; k < count; k++) {
     const u = userNotes[Math.min(r.uStart + k, userNotes.length - 1)];
     out.push({ pitch, start: u.start, dur: u.dur });
-    if (k < count - 1) pitch += lib.fp.iv[r.rStart + k];
+    if (k < count - 1) pitch += hit.refIv[k];
   }
   return out;
 }
@@ -79,12 +94,12 @@ export interface AnalysisView {
   beatsPerBar: number;
   fileName: string;
   example: boolean;
-  librarySize: number;
-  hits: Hit[];
+  reply: SearchReply;
 }
 
 export function renderAnalysis(v: AnalysisView): void {
-  const { notes, hits } = v;
+  const { notes } = v;
+  const { hits } = v.reply;
   const bars = (beat: number) => Math.floor(beat / v.beatsPerBar) + 1;
   $("example-flag").hidden = !v.example;
   $("user-meta").textContent = `${v.fileName} · ${notes.length} notes · ${bars(notes[notes.length - 1].start)} bars`;
@@ -92,6 +107,10 @@ export function renderAnalysis(v: AnalysisView): void {
   const strong = hits.filter((x) => x.level === 2), listen = hits.filter((x) => x.level === 1), faint = hits.filter((x) => x.level === 0);
   $("summary").innerHTML =
     `<span class="pill strong">${strong.length} close</span><span class="pill listen">${listen.length} worth a listen</span><span class="pill faint">${faint.length} passing</span>`;
+
+  const { searched, aligned, ms } = v.reply;
+  $("search-meta").textContent = `Checked ${fmt(searched)} melodies in ${ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`}` +
+    (aligned < searched ? ` · the ${fmt(aligned)} most similar compared note by note` : "");
 
   const flagged = [...strong, ...listen];
   const spans = flagged.map((x) => ({ a: notes[x.r.uStart].start, b: notes[x.r.uEnd].start + notes[x.r.uEnd].dur }));
@@ -106,7 +125,7 @@ export function renderAnalysis(v: AnalysisView): void {
   if (!flagged.length) {
     const p = document.createElement("p");
     p.className = "empty";
-    p.textContent = `No close or notable resemblances against the ${fmt(v.librarySize)} melodies in the library. That only covers this library, so also hum the hook into Google's "Hum to Search" or SoundHound for a much wider check.`;
+    p.textContent = `No close or notable resemblances against the ${fmt(v.reply.searched)} melodies in the library. That only covers this library, so also hum the hook into Google's "Hum to Search" or SoundHound for a much wider check.`;
     box.appendChild(p);
   }
   for (const x of flagged.slice(0, 8)) box.appendChild(renderMatch(x, notes, bars));
@@ -119,11 +138,11 @@ export function renderAnalysis(v: AnalysisView): void {
 }
 
 /** Per-melody credit line, for sources whose license asks for one (e.g. CC BY editions). */
-function attribution(lib: LibraryEntry): string {
+function attribution(lib: EntryInfo): string {
   return lib.attribution ? `<div class="meta">${link(lib.attribution.text, lib.attribution.url)}</div>` : "";
 }
 
-function renderMatch(x: Hit, n: Note[], bars: (beat: number) => number): HTMLElement {
+function renderMatch(x: EngineHit, n: Note[], bars: (beat: number) => number): HTMLElement {
   const r = x.r;
   const div = document.createElement("article");
   div.className = "match";
@@ -143,7 +162,7 @@ function renderMatch(x: Hit, n: Note[], bars: (beat: number) => number): HTMLEle
   div.appendChild(rb);
   drawRoll(svg, [
     { notes: n.slice(r.uStart, r.uEnd + 1), color: "var(--accent)" },
-    { notes: rebuildRef(x.lib, r, n), color: "var(--match)", outline: true },
+    { notes: rebuildRef(x, n), color: "var(--match)", outline: true },
   ], { height: 110 });
   const leg = document.createElement("div");
   leg.className = "legend";

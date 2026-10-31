@@ -1,23 +1,32 @@
 /* Entry point: app state, file input wiring and the analyse step that ties the modules together. */
 import "./styles.css";
 import { EXAMPLE } from "./example";
-import { encode } from "./fingerprint";
-import { loadPdLibrary, type LibraryEntry, type LibraryManifest } from "./library";
+import type { EntryInfo } from "./engine";
+import { encode, type Fingerprint } from "./fingerprint";
+import type { LibraryManifest } from "./library";
 import { pickMelody, skyline } from "./melody";
 import { parseMidi, type Note, type ParsedMidi } from "./midi";
-import { searchLibrary } from "./search";
+import { SearchClient } from "./search-client";
 import { $, showErr } from "./ui/dom";
 import { renderAnalysis, renderLibrary, renderTracks } from "./ui/panels";
 
 /** Below this, a melody is too short to say anything useful. */
 const MIN_NOTES = 6;
 
-/** Built-in entries first, then reference files added in this tab. Nothing here leaves the browser. */
-const library: LibraryEntry[] = [];
-/** Describes the built-in library's sources; null until loaded (or if loading failed). */
-let manifest: LibraryManifest | null = null;
-/** Folder the built-in library is served from. */
-const BASE = import.meta.env.BASE_URL;
+/** The search engine, running in a Web Worker. It holds the library; this page holds only what it shows. */
+const search = new SearchClient();
+/** Folder the built-in library is served from, as an absolute URL: the worker resolves relative
+ * URLs against its own script's location, not the page's. */
+const BASE = new URL(import.meta.env.BASE_URL, location.href).href;
+
+/** What the library panel shows. Nothing here, or in the worker, leaves the browser. */
+const lib: {
+  manifest: LibraryManifest | null;
+  privateIndex: { name: string; credit: string; count: number } | null;
+  added: EntryInfo[];
+} = { manifest: null, privateIndex: null, added: [] };
+
+const showLibrary = () => renderLibrary({ ...lib, base: BASE });
 
 const state: {
   notes: Note[];
@@ -31,25 +40,17 @@ const state: {
 /** Increases on every analysis, so a slow run that finishes late can tell it is out of date. */
 let runId = 0;
 
-/**
- * Show "Checking…", let the browser paint it, then search. The search runs on the main thread
- * and can take a few seconds against thousands of melodies, so without this the page would
- * look frozen. (Phase 4 makes the search itself fast and moves it off the main thread.)
- */
-function analyze(): void {
+/** Search in the worker; the page stays responsive meanwhile. Only the latest run is shown. */
+async function analyze(): Promise<void> {
   const id = ++runId;
-  $("summary").innerHTML = `<span class="pill faint">Checking against ${library.length.toLocaleString("en-US")} melodies…</span>`;
-  requestAnimationFrame(() => setTimeout(() => {
-    if (id !== runId) return;
-    renderAnalysis({
-      notes: state.notes,
-      beatsPerBar: state.beatsPerBar,
-      fileName: state.fileName,
-      example: state.example,
-      librarySize: library.length,
-      hits: searchLibrary(encode(state.notes), library),
-    });
-  }, 0));
+  const { notes, beatsPerBar, fileName, example } = state;
+  $("summary").innerHTML = `<span class="pill faint">Checking…</span>`;
+  try {
+    const reply = await search.call("search", encode(notes));
+    if (id === runId) renderAnalysis({ notes, beatsPerBar, fileName, example, reply });
+  } catch (e) {
+    if (id === runId) showErr("user-err", `Search failed: ${(e as Error).message}`);
+  }
 }
 
 /* ---------- Input handling ---------- */
@@ -72,20 +73,43 @@ async function loadUser(file: File): Promise<void> {
 async function loadRefs(files: File[]): Promise<void> {
   showErr("ref-err", "");
   const bad: string[] = [];
+  const refs: { title: string; fp: Fingerprint }[] = [];
   for (const f of files) {
     try {
       const parsed = parseMidi(await f.arrayBuffer());
       const sky = skyline(parsed.tracks[pickMelody(parsed)].notes);
       if (sky.length < MIN_NOTES) throw new Error("too few notes");
       // Only the fingerprint is kept; the file's notes are discarded here.
-      library.push({ title: f.name.replace(/\.midi?$/i, ""), credit: "Added by you", builtin: false, fp: encode(sky) });
+      refs.push({ title: f.name.replace(/\.midi?$/i, ""), fp: encode(sky) });
     } catch {
       bad.push(f.name);
     }
   }
   if (bad.length) showErr("ref-err", `Skipped ${bad.length} file${bad.length > 1 ? "s" : ""} with no readable melody: ${bad.slice(0, 5).join(", ")}${bad.length > 5 ? "…" : ""}`);
-  renderLibrary(library, manifest, BASE);
+  if (refs.length) lib.added.push(...(await search.call("addRefs", refs)));
+  showLibrary();
   analyze();
+}
+
+/** Load a private index file (e.g. the Lakh index). It is read and indexed inside the worker. */
+async function loadIndex(file: File): Promise<void> {
+  showErr("ref-err", "");
+  const pick = $<HTMLButtonElement>("index-pick");
+  pick.disabled = true;
+  $("index-status").textContent = `Reading ${file.name} and building its search index…`;
+  try {
+    const t0 = performance.now();
+    const { name, credit, count } = await search.call("loadPrivate", file);
+    lib.privateIndex = { name, credit, count };
+    $("index-status").textContent = `Loaded ${count.toLocaleString("en-US")} songs in ${((performance.now() - t0) / 1000).toFixed(1)} s`;
+    showLibrary();
+    analyze();
+  } catch (e) {
+    $("index-status").textContent = "";
+    showErr("ref-err", `Could not load ${file.name}. ${(e as Error).message}`);
+  } finally {
+    pick.disabled = false;
+  }
 }
 
 function wireDrop(zoneId: string, onFiles: (files: File[]) => void): void {
@@ -102,6 +126,12 @@ function wireDrop(zoneId: string, onFiles: (files: File[]) => void): void {
 
 $("user-pick").addEventListener("click", () => $("user-file").click());
 $("ref-pick").addEventListener("click", () => $("ref-file").click());
+$("index-pick").addEventListener("click", () => $("index-file").click());
+$<HTMLInputElement>("index-file").addEventListener("change", (e) => {
+  const input = e.target as HTMLInputElement;
+  if (input.files?.[0]) loadIndex(input.files[0]);
+  input.value = "";
+});
 $<HTMLInputElement>("user-file").addEventListener("change", (e) => {
   const input = e.target as HTMLInputElement;
   if (input.files?.[0]) loadUser(input.files[0]);
@@ -129,13 +159,11 @@ async function start(): Promise<void> {
   renderTracks(state.parsed, state.trackIndex);
   $("lib-count").textContent = "Loading…";
   try {
-    const pd = await loadPdLibrary(BASE);
-    manifest = pd.manifest;
-    library.unshift(...pd.entries);
+    lib.manifest = (await search.call("loadPd", BASE)).manifest;
   } catch (e) {
     showErr("ref-err", (e as Error).message);
   }
-  renderLibrary(library, manifest, BASE);
+  showLibrary();
   analyze();
 }
 

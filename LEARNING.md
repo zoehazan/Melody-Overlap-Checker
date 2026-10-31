@@ -417,3 +417,116 @@ After running `python3 indexer/build_lakh_index.py`, copy the numbers from
    `test_best_melody_version_wins_over_best_audio_match` now fails.
 3. **Try the guard.** Run `touch web/public/test.mid`, then `cd web && npm run build`. Read
    the error, then delete the file.
+
+---
+
+## Phase 4: Fast search at scale
+
+### What was built
+
+Search went from "align against every song" to a two-stage search, running in a background thread:
+
+```
+ page (main thread)                         Web Worker (search-worker.ts → engine.ts)
+ ─────────────────                          ─────────────────────────────────────────
+ your MIDI → skyline → fingerprint ──────►  1. n-gram prefilter (ngram.ts)
+                                               your 6-grams → look up which songs share them
+                                               → IDF-weighted score per song → top 200
+                                            2. Smith-Waterman on those 200 (+ files you added)
+ result cards, piano rolls  ◄────────────  hits: title, credit, alignment, reference intervals
+```
+
+| | Before (Phase 2) | After |
+|---|---|---|
+| Example vs 4,170 public domain melodies | ~650 ms, page frozen | **84 ms**, page responsive |
+| 3-minute melody vs 49,170 melodies | ~1 minute (estimated from 4.9 s per 4,170) | **0.8 s** (target < 5 s) |
+| Load + index a 45,000-song file | – | 8.5 s, page drawing 60 frames/s |
+
+All measured in Chromium. The 45,000 songs were a **synthetic** index of random melodies
+(`scripts/make-synthetic-index.ts`), so the speed target could be checked without touching
+copyrighted data.
+
+### How the n-gram index works (`src/ngram.ts`)
+
+- **An n-gram is 6 consecutive intervals.** Each is packed into one integer: each interval
+  −12…+12 is a base-25 digit, so 25⁶ ≈ 244 million possible keys fit in 32 bits. Sliding the
+  window one note along is one division and one addition.
+- **Inverted index** = for each n-gram, the list of songs containing it ("postings"), like the
+  index at the back of a book. Searching means looking up your melody's ~400 n-grams, not
+  reading 30 million intervals.
+- **IDF weighting.** A song scores `log(total songs / songs containing g)` for each n-gram `g` it
+  shares with you. Rare n-grams are strong evidence; common ones (scales, repeated notes) are
+  nearly worthless.
+- **Stop-grams.** N-grams found in more than 5% of songs are left out entirely, like "the" in a
+  search engine. That saves memory and time, and testing showed keeping them didn't help.
+- **Memory layout.** Building in two passes (count, then fill) puts every posting list in one
+  flat typed array plus an offsets array, instead of millions of small JavaScript arrays. Song
+  IDs are 16-bit when there are fewer than 65,536 songs, and IDF is computed from the list
+  length instead of stored. Those three choices halved the index from 235 MB to 117 MB for 31.5
+  million synthetic intervals.
+- **A hand-written hash table** (`IntMap`, open addressing with linear probing) maps n-gram keys
+  to slots. It uses about 8 bytes per entry; a JavaScript `Map` with millions of number keys is
+  far heavier.
+
+### Does the prefilter lose matches?
+
+This was measured, not assumed (`scripts/bench-search.ts`). For 100 queries made by hiding a
+10–30 note passage of a library melody, with 0–2 notes changed, inside unrelated material:
+
+| Where the source song ended up | Brute force | Prefiltered |
+|---|---|---|
+| Flagged at all | 93 | 90 |
+| In the top 5 | 88 | **90** |
+| Ranked first | 75 | **77** |
+
+- **It loses about 3 in 100** sources that brute force would flag. Two shared only stop-grams;
+  in the third, the changed notes split the passage so that no 6 intervals in a row survived.
+  Keeping the stop-grams was tried, and the two still ranked 265th–506th, so it didn't help.
+- **It ranks the true source higher more often**, because chance matches in unrelated long
+  pieces never make the shortlist.
+- **The total count of flags drops a lot** (only ~15% of brute force's flags survive). That is
+  mostly a good thing: the Phase 2 problem was hundreds of chance "worth a listen" flags, and
+  most of them came from songs that share no distinctive n-gram with your melody.
+
+### Why a Web Worker
+
+JavaScript runs one thing at a time on the page's main thread. Reading a 20 MB gzipped file,
+building a 100+ MB index, or aligning 200 songs there would freeze scrolling and clicks for
+seconds. A Web Worker is a separate thread with no access to the page. The design:
+
+- `engine.ts` (the `SearchEngine` class) holds the library, the private index and the n-gram
+  index. It has no DOM code, so the tests use it directly in Node.
+- `search-worker.ts` is 15 lines: receive `{ id, method, args }`, call that engine method, post
+  back the result or the error.
+- `search-client.ts` wraps that in a typed `call("search", fingerprint)` that returns a Promise.
+- The page never receives the library's fingerprints, only titles, credits and, for each hit,
+  the few intervals needed to redraw the comparison piano roll.
+
+A gotcha worth mentioning: inside a worker, relative URLs resolve against the *worker script's*
+location, not the page's, so the page passes the library's base URL as an absolute URL.
+
+### The private index stays private
+
+"Load reference index" reads the file with the browser's File API and unpacks it with the
+built-in `DecompressionStream`. Nothing is uploaded, the deployed site never contains it (the
+build guard from Phase 3), and it is gone when the tab closes.
+
+### Tradeoffs and limits
+
+- **About 3% of borrowed passages are lost** by the prefilter, as described above. Ideas for
+  Phase 5: "gapped" n-grams that tolerate one changed note, or a smaller n.
+- **Index build takes several seconds** for 45,000 songs, every time the file is loaded.
+  Saving the built index (e.g. in IndexedDB) would make reloads instant, at the cost of
+  keeping a copy in the browser.
+- **The threshold problem from Phase 2 remains.** The counts are smaller now, but a 3-minute
+  random melody still collects "Close match" flags against random songs. Phase 5's job.
+
+### Try it yourself
+
+1. **Feel the prefilter.** `cd web && npx tsx scripts/bench-search.ts` prints the recall table.
+   Change `TOP_K` in `src/search.ts` from 200 to 50, run it again, and explain the change.
+2. **Watch stop-grams.** Run `MAX_DF=1 DEBUG_LOST=1 npx tsx scripts/bench-search.ts` (no
+   stop-grams) and compare the index size and the lost songs with the default.
+3. **See the worker keep the page alive.** Run `npx tsx scripts/make-synthetic-index.ts`, start
+   `npm run dev`, load `data/synthetic-index.json.gz` with "Load reference index", and scroll
+   the page while it loads.

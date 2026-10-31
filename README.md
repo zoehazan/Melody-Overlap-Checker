@@ -24,6 +24,22 @@ npm run preview    # serve web/dist/ locally to check the production build
 `web/dist/` is a plain static folder and can be uploaded to any static host. It contains only the
 public domain reference library.
 
+## Speed
+
+Searches run in a Web Worker. An n-gram index shortlists the 200 most similar songs, and only
+those are compared note by note. Measured in Chromium on a 2-core Codespace:
+
+| | |
+|---|---|
+| Example melody vs the public domain library (4,170 melodies) | 84 ms |
+| 3-minute melody (382 notes) vs 49,170 melodies (library + a 45,000-song test index) | 0.8 s |
+| Loading and indexing a 45,000-song index file | 8.5 s, page stays responsive |
+
+To try it without building the Lakh index, make a synthetic test index of random melodies
+(`cd web && npx tsx scripts/make-synthetic-index.ts`, writes `data/synthetic-index.json.gz`)
+and load that. Benchmarks: `npx tsx scripts/bench-search.ts` (prefilter vs brute force) and
+`npx tsx scripts/bench-scale.ts` (45,000 songs).
+
 ## Rebuild the public domain library
 
 The built-in library (`web/public/pd-library.json` and `web/public/pd-library/`) is committed, so
@@ -66,14 +82,16 @@ python3 indexer/build_lakh_index.py
   index ever appears in `web/public/`.
 
 To use the index, download `data/index/lakh-index.json.gz` from the Codespace (right-click in
-the file explorer, then Download) and load it in the app with "Load reference index" (Phase 4).
+the file explorer, then Download), open the app, and click **Load reference index** in the
+Reference library panel. The file is read inside your browser tab only: it is never uploaded,
+and it is forgotten when you close the tab. Loading and indexing takes a few seconds.
 Dataset credit: Colin Raffel, Lakh MIDI Dataset (CC BY 4.0), and the Million Song Dataset.
 
 ## Layout
 
 ```
 web/        Vite + TypeScript app
-  src/        midi, melody, fingerprint, align, search modules, ui/ rendering
+  src/        midi, melody, fingerprint, align, ngram, search, engine (Web Worker), ui/ rendering
   public/     pd-library.json + pd-library/: public domain fingerprints (committed)
   scripts/    test fixture and benchmark helpers
   test/       Vitest unit tests

@@ -6,12 +6,15 @@
  */
 import type { Fingerprint } from "./fingerprint";
 
+/** Where an entry came from: the shipped public domain library, a private index file loaded
+ * in this tab (e.g. Lakh), or a MIDI file added in this tab. */
+export type Origin = "pd" | "private" | "added";
+
 export interface LibraryEntry {
   title: string;
-  /** Composer and year, or "Traditional", shown under the title. */
+  /** Composer and year, "Traditional", or the artist, shown under the title. */
   credit: string;
-  /** True for the shipped public domain library, false for files the user added in this tab. */
-  builtin: boolean;
+  origin: Origin;
   fp: Fingerprint;
   /** Credit the source's license asks for, e.g. the typesetter of a CC BY edition. */
   attribution?: { text: string; url?: string };
@@ -76,7 +79,7 @@ export function entriesFromFile(file: LibraryFile, source?: LibrarySource): Libr
   return file.melodies.map((m) => ({
     title: m.title,
     credit: m.year ? `${m.composer}, ${m.year}` : m.composer,
-    builtin: true,
+    origin: "pd" as const,
     fp: { iv: decodeIv(m.iv), rh: decodeRh(m.rh) },
     attribution: m.typesetter
       ? { text: `${source?.publisher ?? source?.name ?? file.source} edition typeset by ${m.typesetter}, ${m.license}`, url: m.url }
@@ -100,4 +103,49 @@ export async function loadPdLibrary(base: string): Promise<PdLibrary> {
   if (manifest.version !== 2) throw new Error("Unrecognised library manifest.");
   const files = await Promise.all(manifest.sources.map((s) => get(s.file) as Promise<LibraryFile>));
   return { manifest, entries: files.flatMap((f, i) => entriesFromFile(f, manifest.sources[i])) };
+}
+
+/* ---------- Private index files (e.g. the Lakh index from indexer/build_lakh_index.py) ---------- */
+
+/** Shape of a melody index file such as data/index/lakh-index.json.gz. */
+export interface MelodyIndexFile {
+  version: 1;
+  kind: "melody-index";
+  name: string;
+  private: boolean;
+  credit: string;
+  melodies: { title: string; artist: string; iv: string; rh: string }[];
+}
+
+export interface PrivateIndex {
+  name: string;
+  credit: string;
+  entries: LibraryEntry[];
+}
+
+/**
+ * Read a melody index file chosen by the user. It is read locally in this tab and never
+ * uploaded. Gzipped files (starting with the bytes 1f 8b) are unpacked with the browser's
+ * built-in DecompressionStream.
+ */
+export async function readIndexFile(file: Blob): Promise<PrivateIndex> {
+  const head = new Uint8Array(await file.slice(0, 2).arrayBuffer());
+  const gz = head[0] === 0x1f && head[1] === 0x8b;
+  const stream = gz ? file.stream().pipeThrough(new DecompressionStream("gzip")) : file.stream();
+  let data: MelodyIndexFile;
+  try {
+    data = await new Response(stream).json();
+  } catch {
+    throw new Error("This file is not a readable melody index (expected .json or .json.gz).");
+  }
+  if (data?.kind !== "melody-index" || data.version !== 1 || !Array.isArray(data.melodies))
+    throw new Error("This file is not a melody index built by indexer/build_lakh_index.py.");
+  return {
+    name: data.name,
+    credit: data.credit,
+    entries: data.melodies.map((m) => ({
+      title: m.title, credit: m.artist, origin: "private", fp: { iv: decodeIv(m.iv), rh: decodeRh(m.rh) },
+      attribution: { text: `From your private index: ${data.name}` },
+    })),
+  };
 }
