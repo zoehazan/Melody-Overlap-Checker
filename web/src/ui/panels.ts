@@ -1,23 +1,46 @@
 /* Rendering for the three panels: your melody, the reference library and the results. */
 import type { Alignment } from "../align";
-import type { LibraryEntry } from "../library";
+import type { LibraryEntry, LibraryManifest } from "../library";
 import type { Note, ParsedMidi } from "../midi";
 import type { Hit } from "../search";
 import { $, el, esc } from "./dom";
 import { drawRoll } from "./roll";
 
-export function renderLibrary(library: LibraryEntry[]): void {
+const fmt = (n: number) => n.toLocaleString("en-US");
+const link = (text: string, url: string | null | undefined) =>
+  url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(text)}</a>` : esc(text);
+
+/**
+ * The library panel: built-in sources with their size, license and credit (as each source's
+ * terms require), then a chip per file added in this tab.
+ * `base` is the folder that pd-library.json was loaded from, for the credits link.
+ */
+export function renderLibrary(library: LibraryEntry[], manifest: LibraryManifest | null, base: string): void {
+  const list = $("lib-sources");
+  list.innerHTML = "";
+  for (const s of manifest?.sources ?? []) {
+    const li = document.createElement("li");
+    li.innerHTML = `<span>${link(s.name, s.url)}</span><span class="meta">${fmt(s.count)} · ${link(s.license, s.licenseUrl)}</span>`;
+    li.title = s.description;
+    list.appendChild(li);
+  }
+  if (manifest) {
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="meta">${link("Credits for every built-in melody", base + manifest.credits)}</span>`;
+    list.appendChild(li);
+  }
+
   const chips = $("lib-chips");
   chips.innerHTML = "";
-  for (const l of library) {
+  for (const l of library.filter((x) => !x.builtin)) {
     const c = document.createElement("span");
-    c.className = "chip" + (l.builtin ? "" : " user");
+    c.className = "chip user";
     c.textContent = l.title;
     c.title = l.credit;
     chips.appendChild(c);
   }
   const added = library.filter((l) => !l.builtin).length;
-  $("lib-count").textContent = `${library.length} melodies` + (added ? ` · ${added} added` : "");
+  $("lib-count").textContent = `${fmt(library.length)} melodies` + (added ? ` · ${added} added` : "");
 }
 
 /** The track dropdown. With no parsed file, shows the built-in example as a single fixed option. */
@@ -83,7 +106,7 @@ export function renderAnalysis(v: AnalysisView): void {
   if (!flagged.length) {
     const p = document.createElement("p");
     p.className = "empty";
-    p.textContent = `No close or notable resemblances against the ${v.librarySize} melodies in the library. That only covers this library, so also hum the hook into Google's "Hum to Search" or SoundHound for a much wider check.`;
+    p.textContent = `No close or notable resemblances against the ${fmt(v.librarySize)} melodies in the library. That only covers this library, so also hum the hook into Google's "Hum to Search" or SoundHound for a much wider check.`;
     box.appendChild(p);
   }
   for (const x of flagged.slice(0, 8)) box.appendChild(renderMatch(x, notes, bars));
@@ -95,13 +118,18 @@ export function renderAnalysis(v: AnalysisView): void {
   }
 }
 
+/** Per-melody credit line, for sources whose license asks for one (e.g. CC BY editions). */
+function attribution(lib: LibraryEntry): string {
+  return lib.attribution ? `<div class="meta">${link(lib.attribution.text, lib.attribution.url)}</div>` : "";
+}
+
 function renderMatch(x: Hit, n: Note[], bars: (beat: number) => number): HTMLElement {
   const r = x.r;
   const div = document.createElement("article");
   div.className = "match";
   const label = x.level === 2 ? '<span class="pill strong">Close match</span>' : '<span class="pill listen">Worth a listen</span>';
   div.innerHTML = `
-      <div class="match-head"><div><h3>${esc(x.lib.title)}</h3><div class="meta">${esc(x.lib.credit)}</div></div>${label}</div>
+      <div class="match-head"><div><h3>${esc(x.lib.title)}</h3><div class="meta">${esc(x.lib.credit)}</div>${attribution(x.lib)}</div>${label}</div>
       <div class="stats">
         <div class="stat"><b>Bars ${bars(n[r.uStart].start)}–${bars(n[r.uEnd].start)}</b><span>in your melody</span></div>
         <div class="stat"><b>${r.exact + 1} notes</b><span>matching run</span></div>

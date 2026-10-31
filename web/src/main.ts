@@ -2,7 +2,7 @@
 import "./styles.css";
 import { EXAMPLE } from "./example";
 import { encode } from "./fingerprint";
-import { loadPdLibrary, type LibraryEntry } from "./library";
+import { loadPdLibrary, type LibraryEntry, type LibraryManifest } from "./library";
 import { pickMelody, skyline } from "./melody";
 import { parseMidi, type Note, type ParsedMidi } from "./midi";
 import { searchLibrary } from "./search";
@@ -14,6 +14,10 @@ const MIN_NOTES = 6;
 
 /** Built-in entries first, then reference files added in this tab. Nothing here leaves the browser. */
 const library: LibraryEntry[] = [];
+/** Describes the built-in library's sources; null until loaded (or if loading failed). */
+let manifest: LibraryManifest | null = null;
+/** Folder the built-in library is served from. */
+const BASE = import.meta.env.BASE_URL;
 
 const state: {
   notes: Note[];
@@ -24,15 +28,28 @@ const state: {
   fileName: string;
 } = { notes: EXAMPLE, beatsPerBar: 4, parsed: null, trackIndex: 0, example: true, fileName: "Example melody" };
 
+/** Increases on every analysis, so a slow run that finishes late can tell it is out of date. */
+let runId = 0;
+
+/**
+ * Show "Checking…", let the browser paint it, then search. The search runs on the main thread
+ * and can take a few seconds against thousands of melodies, so without this the page would
+ * look frozen. (Phase 4 makes the search itself fast and moves it off the main thread.)
+ */
 function analyze(): void {
-  renderAnalysis({
-    notes: state.notes,
-    beatsPerBar: state.beatsPerBar,
-    fileName: state.fileName,
-    example: state.example,
-    librarySize: library.length,
-    hits: searchLibrary(encode(state.notes), library),
-  });
+  const id = ++runId;
+  $("summary").innerHTML = `<span class="pill faint">Checking against ${library.length.toLocaleString("en-US")} melodies…</span>`;
+  requestAnimationFrame(() => setTimeout(() => {
+    if (id !== runId) return;
+    renderAnalysis({
+      notes: state.notes,
+      beatsPerBar: state.beatsPerBar,
+      fileName: state.fileName,
+      example: state.example,
+      librarySize: library.length,
+      hits: searchLibrary(encode(state.notes), library),
+    });
+  }, 0));
 }
 
 /* ---------- Input handling ---------- */
@@ -67,7 +84,7 @@ async function loadRefs(files: File[]): Promise<void> {
     }
   }
   if (bad.length) showErr("ref-err", `Skipped ${bad.length} file${bad.length > 1 ? "s" : ""} with no readable melody: ${bad.slice(0, 5).join(", ")}${bad.length > 5 ? "…" : ""}`);
-  renderLibrary(library);
+  renderLibrary(library, manifest, BASE);
   analyze();
 }
 
@@ -112,11 +129,13 @@ async function start(): Promise<void> {
   renderTracks(state.parsed, state.trackIndex);
   $("lib-count").textContent = "Loading…";
   try {
-    library.unshift(...(await loadPdLibrary(`${import.meta.env.BASE_URL}pd-library.json`)));
+    const pd = await loadPdLibrary(BASE);
+    manifest = pd.manifest;
+    library.unshift(...pd.entries);
   } catch (e) {
     showErr("ref-err", (e as Error).message);
   }
-  renderLibrary(library);
+  renderLibrary(library, manifest, BASE);
   analyze();
 }
 

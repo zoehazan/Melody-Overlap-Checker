@@ -68,6 +68,10 @@ select { font: 14px var(--body); padding: 7px 8px; border-radius: 6px; border: 1
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { font-size: 12.5px; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--bg); }
 .chip.user { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.sources { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13.5px; }
+.sources li { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.sources .meta { font-size: 12px; }
+.meta a, .sources a, .note a { color: var(--accent); }
 .example-flag { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; padding: 3px 7px; border-radius: 4px; background: var(--match-soft); color: var(--match); }
 .summary { display: flex; gap: 10px; flex-wrap: wrap; }
 .pill { font-size: 13px; padding: 5px 10px; border-radius: 999px; font-weight: 700; font-variant-numeric: tabular-nums; }

@@ -102,6 +102,8 @@ melodies used to be note text inside the code. They now live in `web/scripts/see
 and `npm run build:seed-library` turns them into `pd-library.json`, which holds fingerprints only.
 The app fetches that file when it starts. This is the same format Phase 2 will fill with
 thousands of tunes.
+*(Since Phase 2: the seed melodies live in `indexer/sources/seed.py`, and the library is built
+by `python3 indexer/build_pd_library.py`.)*
 
 **`ui/`: rendering.** `roll.ts` draws a piano roll as SVG (time across, pitch up).
 `panels.ts` fills in the library chips, track picker and result cards. Because the library holds
@@ -165,3 +167,128 @@ your note and using your timings. So the picture shows exactly what the matcher 
    `classify` makes that happen?
 3. **Feel the weights.** Run `npm run test:watch`, change the leap weight in `weight()` from 3 to
    1.5, and see which tests fail. Then change it back.
+
+---
+
+## Phase 2: Public domain library
+
+### What was built
+
+The built-in library grew from 13 hand-entered melodies to **4,170**: the 13 seed tunes plus 4,157 movements from
+1,806 Mutopia pieces. It is built by one command:
+
+```
+python3 indexer/build_pd_library.py
+```
+
+```
+ GitHub API ──► list of ~2,100 Mutopia piece folders (one request)
+                   │
+ mutopiaproject.org ──► <piece>.rdf  title, composer, date, license, typesetter, arranger
+                   │
+                   ▼  public domain rules (dated ≤ 1930, or traditional, or composer died ≤ 1900;
+                   │                       no arrangements)
+ mutopiaproject.org ──► <piece>.mid / -mids.zip   downloaded into memory, never saved
+                   │
+                   ▼  melodyfp: parse → pick melody track → skyline → encode   (Python port)
+                   │
+ web/public/pd-library.json          manifest: sources, licenses, counts
+ web/public/pd-library/<source>.json  fingerprints, one file per license
+ web/public/pd-library/CREDITS.txt    every piece, its typesetter, license and link
+```
+
+### Choosing sources: three of four candidates were skipped
+
+The brief listed four candidate sources and said to read each one's terms first. That turned
+out to be the most important step of the phase:
+
+| Source | Terms | Decision |
+|---|---|---|
+| The Session | ODbL plus a clause forbidding processing "in any way with Large Language Models" | Skipped: this project is built with an AI assistant |
+| Essen Folksong Collection | CCARH: personal, single-user, academic research only | Skipped: a public demo is redistribution |
+| Nottingham Folk Music Database | No license from its makers; one sub-collection's rights explicitly reserved; a third party's GPL label | Skipped: no clear permission |
+| Mutopia Project | Public Domain, CC BY or CC BY-SA, explicitly allowing redistribution and modification | Used |
+
+Things worth saying in an interview:
+- **"Free to download" is not the same as "licensed for reuse".** Two of these collections are
+  freely downloadable but don't allow republishing.
+- **The edition and the composition are separate rights.** Mutopia licenses its *typeset
+  editions* freely, but that says nothing about whether the *music* is out of copyright. So the
+  indexer applies its own US public domain test (published in 1930 or earlier) using each
+  piece's date and the composer's death year. Where the evidence is unclear, the piece is left out.
+- **Attribution is part of the license.** CC BY means credit the typesetter; CC BY-SA also means
+  sharing derived data under the same license. So the library is split into one file per
+  license family, each file states its license, every result card credits the edition's
+  typesetter with a link, and a credits file lists all of them.
+
+### Why Python, and how it stays identical to the web app
+
+The indexer is Python because Phase 3 (the Lakh index) is a long batch job that suits Python
+better than a browser. But a reference melody must be fingerprinted *exactly* the way the
+browser fingerprints your melody, or matches are silently missed. So `indexer/melodyfp/` is a
+line-for-line port of `midi.ts`, `melody.ts` and `fingerprint.ts`, and a cross-language test
+proves they agree:
+
+1. A TypeScript script (`npm run build:py-parity-fixture`) generates 60 synthetic MIDI files and
+   200 note sequences, and saves the recipe for each file, a SHA-256 hash of its bytes, and what the
+   TypeScript code makes of it.
+2. The Python test rebuilds each file with a Python port of the test MIDI writer, checks the
+   hash (so both languages are reading the *same bytes*), and checks that parsing, track
+   choice, skyline and fingerprint all come out identical.
+
+Two small differences between the languages had to be handled explicitly (`melodyfp/jsmath.py`):
+- **Rounding.** Python's `round(2.5)` is 2 (banker's rounding); JavaScript's `Math.round(2.5)` is 3.
+- **Whitespace.** Python's `strip()` removes a few control characters that JavaScript's `trim()`
+  keeps, which could change a track name.
+
+The test also caught a weakness in itself. At first, its chord notes all started at exactly the
+same moment, so changing the 0.06-beat chord window didn't fail anything. Giving chord notes
+humanized timing fixed that. Checking that a test fails when the code is deliberately broken
+("mutation testing") is how you find this out.
+
+### The library format
+
+- **Fingerprints as text.** Each interval becomes one letter (A = −12 … M = 0 … Y = +12) and each
+  rhythm value one digit (0 = −3 … 3 = same … 6 = +3). That's about 2 bytes per note instead of
+  about 6 as JSON number arrays, and it compresses well. The app decodes them into `Int8Array`s
+  (1 byte per value; a normal JS array of numbers uses 8).
+- **One file per license** plus a small manifest, as explained above. The app loads them in
+  parallel.
+- **Still no notes.** A test fails if any melody has a field other than title, composer, year,
+  license, typesetter, link and the two fingerprint strings.
+
+### Tradeoffs and limits
+
+- **Mostly classical, not folk.** With the folk collections skipped, the library is mostly
+  classical and Romantic music (Bach, Mozart, Beethoven, Chopin…), plus Mutopia's traditional
+  pieces and the 13 seed tunes. It still says nothing about modern pop.
+- **Melody detection on classical scores is rough.** For a piano piece, the skyline takes the
+  top note, which is usually but not always the tune. Inner voices and accompaniment figures
+  get mixed in.
+- **Multi-movement pieces** become one entry per movement file.
+- **Search is still brute force:** every melody is aligned against yours. Against 1.3 million
+  library intervals that takes about 0.6 s for the 32-note example and about 5 s for a 3-minute
+  melody, measured in Node with `npx tsx scripts/bench-search.ts`. The app now shows "Checking…"
+  first so the page doesn't look frozen. Phase 4 adds the n-gram prefilter that makes this fast.
+- **Too many "worth a listen" flags, the biggest open problem.** The thresholds were designed for
+  13 short tunes. Against thousands of long classical pieces, a run of 6-14 matching intervals
+  (often a scale) turns up by chance all the time. The example now gets 4 close matches and
+  317 "worth a listen", and a *random* 300-note melody gets 1 close and 393 "worth a listen".
+  The top results are still right (Ode to Joy first, and Mutopia's own edition of Ode to Joy
+  found independently), but the counts would alarm a songwriter. The principled fix is
+  statistical: judge a match by how likely it is to happen by chance given the reference's
+  length (the idea behind BLAST's "E-value" in bioinformatics), rather than by fixed counts.
+  That is threshold tuning, which belongs in Phase 5 with real measurements, so this phase
+  deliberately left the thresholds alone.
+
+### Try it yourself
+
+1. **Run a trial build** into a scratch folder:
+   `python3 indexer/build_pd_library.py --limit 20 --out /tmp/trial`, then open
+   `/tmp/trial/pd-library/CREDITS.txt`. Which pieces were skipped, and why?
+2. **Tighten a rule.** In `indexer/sources/mutopia.py`, `UNDATED_DEATH_CUTOFF` is 1900. Change
+   it to 1880, add a test for a composer who died in 1890 in `tests/test_mutopia.py`, and run
+   the tests. What happens to the library size?
+3. **Break parity on purpose.** Change `CHORD_WINDOW` in `melodyfp/melody.py` to 0.05 and run
+   `python3 -m unittest discover -s tests -t .` from `indexer/`. Read the failure message, then
+   change it back.

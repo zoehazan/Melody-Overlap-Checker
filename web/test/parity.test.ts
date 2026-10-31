@@ -15,9 +15,11 @@ import { pickMelody, skyline } from "../src/melody";
 import { parseMidi, type Note } from "../src/midi";
 import { searchLibrary } from "../src/search";
 import { writeMidi } from "./midi-writer";
+import { randomMelody, rng } from "./random-melody";
 
 const PROTOTYPE = fileURLToPath(new URL("../../prototype.html", import.meta.url));
-const LIBRARY = fileURLToPath(new URL("../public/pd-library.json", import.meta.url));
+// The 13 seed melodies, which are the prototype's built-in library.
+const SEED = fileURLToPath(new URL("../public/pd-library/seed.json", import.meta.url));
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function loadPrototype(): any {
@@ -28,32 +30,13 @@ function loadPrototype(): any {
   return new Function(`${code}; return { encode, align, classify, parseMidi, skyline, pickMelody, seqFromText, PD };`)();
 }
 
-/** Small seeded random generator, so failures are reproducible. */
-function rng(seed: number) {
-  return () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
-}
-
-function randomMelody(rand: () => number, len: number): Note[] {
-  const out: Note[] = [];
-  let pitch = 55 + Math.floor(rand() * 20), t = 0;
-  const durs = [0.25, 0.5, 0.5, 1, 1, 1, 1.5, 2];
-  for (let k = 0; k < len; k++) {
-    const dur = durs[Math.floor(rand() * durs.length)];
-    out.push({ pitch, start: t, dur });
-    t += dur;
-    pitch += Math.floor(rand() * 9) - 4 + (rand() < 0.1 ? 12 * Math.sign(rand() - 0.5) : 0);
-    pitch = Math.min(100, Math.max(30, pitch)); // stay inside MIDI's 0-127, even after chord notes are added below
-  }
-  return out;
-}
-
 describe.skipIf(!existsSync(PROTOTYPE))("parity with prototype.html", () => {
   const proto = loadPrototype();
-  const library = entriesFromFile(JSON.parse(readFileSync(LIBRARY, "utf8")) as LibraryFile);
+  const library = entriesFromFile(JSON.parse(readFileSync(SEED, "utf8")) as LibraryFile);
 
-  it("built-in library fingerprints are identical", () => {
-    expect(library.map((l) => [l.title, l.credit, l.fp])).toEqual(
-      proto.PD.map(([title, credit, txt]: string[]) => [title, credit, proto.encode(proto.seqFromText(txt))]),
+  it("seed library fingerprints are identical to the prototype's built-in library", () => {
+    expect(library.map((l) => [l.title, Array.from(l.fp.iv), Array.from(l.fp.rh)])).toEqual(
+      proto.PD.map(([title, , txt]: string[]) => [title, ...Object.values(proto.encode(proto.seqFromText(txt)))]),
     );
   });
 
@@ -112,14 +95,10 @@ describe.skipIf(!existsSync(PROTOTYPE))("parity with prototype.html", () => {
   });
 });
 
-describe("pd-library.json", () => {
-  it("is up to date with the seed melodies (run `npm run build:seed-library` if this fails)", async () => {
-    const { buildSeedLibrary } = await import("../scripts/seed-library");
-    expect(JSON.parse(readFileSync(LIBRARY, "utf8"))).toEqual(buildSeedLibrary());
-  });
-
-  it("stores fingerprints and credits only, never notes", () => {
-    const file = JSON.parse(readFileSync(LIBRARY, "utf8")) as LibraryFile;
-    for (const m of file.melodies) expect(Object.keys(m).sort()).toEqual(["credit", "iv", "rh", "source", "title"]);
+describe("Python parity fixture", () => {
+  it("is up to date with the TypeScript pipeline (run `npm run build:py-parity-fixture` if this fails)", async () => {
+    const { buildPyParityFixture } = await import("./py-parity-fixture");
+    const path = fileURLToPath(new URL("../../indexer/tests/fixtures/parity.json", import.meta.url));
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(JSON.parse(JSON.stringify(buildPyParityFixture())));
   });
 });

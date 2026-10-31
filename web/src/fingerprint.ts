@@ -10,12 +10,13 @@
  */
 import type { Note } from "./midi";
 
+/** Plain arrays for your melody, Int8Arrays (1 byte per value) for the library's thousands of melodies. */
 export interface Fingerprint {
-  iv: number[];
-  rh: number[];
+  iv: ArrayLike<number>;
+  rh: ArrayLike<number>;
 }
 
-export function encode(notes: Note[]): Fingerprint {
+export function encode(notes: Note[]): { iv: number[]; rh: number[] } {
   const iv: number[] = [], rh: number[] = [];
   for (let k = 0; k < notes.length - 1; k++) {
     let d = notes[k + 1].pitch - notes[k].pitch;

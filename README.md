@@ -24,18 +24,37 @@ npm run preview    # serve web/dist/ locally to check the production build
 `web/dist/` is a plain static folder and can be uploaded to any static host. It contains only the
 public domain reference library.
 
-If you edit the seed melodies in `web/scripts/seed-melodies.ts`, regenerate the library with
-`npm run build:seed-library`.
+## Rebuild the public domain library
+
+The built-in library (`web/public/pd-library.json` and `web/public/pd-library/`) is committed, so
+you only need this to refresh it or after changing the indexer. Run from the repository root in
+a Codespace (needs Python 3.10+, no packages to install):
+
+```bash
+python3 indexer/build_pd_library.py
+```
+
+The first run downloads metadata and MIDI for about 2,100 Mutopia pieces and takes about 10
+minutes. Metadata and fingerprints are cached in `data/cache/` (gitignored), so later runs are
+quick. MIDI files are processed in memory and never saved. Add `--limit 50` for a quick trial.
+
+Indexer tests (Python, standard library only):
+
+```bash
+cd indexer && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t .
+```
+
+Which sources are used, which were skipped and why, and their credits: see `LICENSES.md`.
 
 ## Layout
 
 ```
 web/        Vite + TypeScript app
   src/        midi, melody, fingerprint, align, search modules, ui/ rendering
-  public/     pd-library.json: public domain fingerprints (committed)
-  scripts/    builds pd-library.json
+  public/     pd-library.json + pd-library/: public domain fingerprints (committed)
+  scripts/    test fixture and benchmark helpers
   test/       Vitest unit tests
-indexer/    Python library and index builders (later phases)
+indexer/    Python: builds the public domain library (Lakh index in a later phase)
 eval/       evaluation harness and results (later phases)
 data/       private downloads and indexes, never committed
 prototype.html   the original single-file prototype
