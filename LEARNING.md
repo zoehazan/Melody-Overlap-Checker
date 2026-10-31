@@ -292,3 +292,128 @@ humanized timing fixed that. Checking that a test fails when the code is deliber
 3. **Break parity on purpose.** Change `CHORD_WINDOW` in `melodyfp/melody.py` to 0.05 and run
    `python3 -m unittest discover -s tests -t .` from `indexer/`. Read the failure message, then
    change it back.
+
+---
+
+## Phase 3: Lakh reference index
+
+### What was built
+
+A second indexer, `indexer/build_lakh_index.py`, that turns the Lakh MIDI Dataset into a
+**private** fingerprint index of modern songs. It's one command, run in your own Codespace:
+
+```
+ match_scores.json  (MIDI file ↔ MSD track, with match confidence)
+ unique_tracks.txt  (MSD track → artist, title)
+        │
+        ▼  1. give each MIDI file to the one track it matches best
+           2. group tracks into songs by normalised artist + title
+        │
+ lmd_matched.tar.gz ──► read file by file, straight from the archive (never extracted)
+        │               the same file sits in several folders: read it once
+        ▼  melodyfp: parse → pick melody track → skyline → encode   (2 processes in parallel)
+        │
+        ▼  3. per song, keep the version whose melody track scores highest
+              (match confidence breaks ties)
+        │
+ data/index/lakh-index.json.gz       title, artist, MSD id, fingerprint. PRIVATE
+ data/index/lakh-songs.tsv           which version was kept per song, and its scores
+ data/index/lakh-build-report.json   counts only
+        │
+        ▼  archive deleted
+```
+
+### The dataset was not what the brief assumed
+
+Reading `match_scores.json` before writing any code showed the real shape of LMD-matched:
+
+- **45,129 MIDI files, but only 31,034 Million Song Dataset tracks**, linked by 116,189
+  pairs. So "45,000 songs" was really counting files.
+- **Matches go both ways.** Half the tracks have several MIDI versions (one has 606!), and
+  24,116 files are matched to more than one track. The dataset's own FAQ warns that one house
+  track is often matched to dozens of remixes.
+- **The Million Song Dataset lists songs more than once** (album, compilation, remaster, radio edit).
+  Grouping by normalised artist and title turns 31,034 tracks into **26,134 songs**.
+
+That's why the indexer works in three steps:
+1. Each MIDI file goes to its single best-matching track, so one fingerprint can't appear under
+   dozens of titles.
+2. Tracks are grouped into songs.
+3. For each song, one version is kept.
+
+### "Keep the best-scoring version": which score?
+
+There are two candidates:
+- **Match confidence** from the dataset: how well the MIDI lines up with the audio recording.
+- **Melody track score** from our own `track_score`: how confident we are that we found the tune.
+
+The indexer ranks by melody score first and breaks ties with match confidence. A version
+with a track called "Melody" or "Vocal" is worth more to this tool than a slightly better
+audio alignment of a file whose melody we would have to guess. Phase 5's evaluation can test
+whether that choice was right.
+
+### Design decisions worth explaining
+
+- **No `pretty_midi`, although the brief suggested it.** `pretty_midi` groups notes by
+  *instrument* rather than by MIDI track, and converts times to seconds using the tempo. The
+  web app works with tracks and beats. Using it would make the index pick and score melody
+  tracks differently from the browser, so matches would be silently missed. Reusing
+  `melodyfp`, already proven identical to the TypeScript, guarantees both sides fingerprint a
+  song the same way, and keeps the indexer free of dependencies.
+- **Raw MIDI never touches the disk.** Python's `tarfile` in streaming mode (`"r|gz"`) reads the
+  archive front to back and hands each file's bytes over in memory. The archive itself is
+  deleted once the index is built (ground rule 2). If a build fails, the archive is kept so a
+  rerun doesn't download 1.4 GB again.
+- **Two locks against leaking the private index**, because there are two ways to leak:
+  - *Git (commit):* the indexer checks with `git check-ignore` that its output is ignored.
+  - *Deployment (publish):* anything in `web/public/` is copied into the deployed site,
+    *even if git ignores it*. A test caught exactly this: the first version of the indexer
+    happily wrote to `web/public/`, because `*lakh*.json.gz` is gitignored there. Now the
+    indexer only writes inside `data/`, and the Vite build refuses to run if a MIDI file or
+    index ever appears in `web/public/`.
+- **Tested without copyrighted data.** The tests build a miniature fake LMD: the same folder
+  layout, `match_scores.json` and `unique_tracks.txt` formats, and edge cases (a file
+  matched to two tracks, a remaster listed as a separate track, a corrupt file, a drums-only
+  file, a track with no metadata). The "songs" are public domain seed tunes under made-up artist
+  names. The real metadata was checked separately: all 31,034 tracks have an artist and title,
+  and a spot check of merged groups looked right.
+- **Song metadata table** (`lakh-songs.tsv`): one row per song with the MIDI file kept, its
+  melody and match scores, note count and how many versions were compared. That makes the
+  "which version" decision auditable, and gives Phase 5 something to analyse.
+
+### Tradeoffs and limits
+
+- **Coverage:** mostly pop, rock and R&B released before about 2015, transcribed by fans with
+  uneven quality. Recent songs aren't covered.
+- **Melody detection is the weak link.** Many fan-made files put the vocal line on a track
+  called "Piano" or "Track 3", and format-0 files put every instrument on one track, so the
+  skyline then takes the top note of the whole arrangement. The web app has the same limit,
+  and the two sides at least agree.
+- **One version per song** means that if the chosen file's melody track is wrong, the song is
+  effectively missing. Keeping the top two versions would trade index size for recall.
+- **Full songs, not just hooks.** Each fingerprint covers the whole melody track, which makes
+  the index larger and gives more chance matches (see the Phase 2 note on thresholds).
+
+### Your build: fill this in
+
+After running `python3 indexer/build_lakh_index.py`, copy the numbers from
+`data/index/lakh-build-report.json` here. They're counts only, so they're safe to commit:
+
+| | |
+|---|---|
+| Songs indexed | |
+| MIDI files without a usable melody | |
+| Total intervals | |
+| Index size (gzipped, target < 40 MB) | |
+| Build time | |
+
+### Try it yourself
+
+1. **Read your own build.** Open `data/index/lakh-songs.tsv` in the Codespace and sort by
+   `melody_track_score`. Look at a few low-scoring songs: what went wrong with their files?
+2. **Change the tie-break.** In `indexer/sources/lakh.py`, `Song.offer` ranks by
+   `(track_score, match_score, md5)`. Swap the first two, run
+   `python3 -m unittest tests.test_lakh` from `indexer/`, and explain why
+   `test_best_melody_version_wins_over_best_audio_match` now fails.
+3. **Try the guard.** Run `touch web/public/test.mid`, then `cd web && npm run build`. Read
+   the error, then delete the file.

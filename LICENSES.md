@@ -4,7 +4,18 @@ This file records the terms for every source of reference melodies that ships wi
 Only works that are public domain in the US (published in 1930 or earlier, or traditional) are
 included, and only as interval and rhythm fingerprints, never as playable notes or MIDI.
 
-The private Lakh MIDI reference index (Phase 3) is not distributed and is not covered here.
+The private Lakh MIDI reference index is not distributed. It is built locally by
+`indexer/build_lakh_index.py`, kept in the gitignored `data/` folder, and used only for personal
+checks. For the record, its sources and terms (read 2026-10-31):
+
+- **Lakh MIDI Dataset v0.1** (LMD-matched), https://colinraffel.com/projects/lmd/: compilation
+  under CC BY 4.0. Cite the dataset page and C. Raffel, "Learning-Based Methods for Comparing
+  Sequences, with Applications to Audio-to-MIDI Alignment and Matching", PhD thesis, 2016.
+  The songs themselves are copyrighted; the dataset page says the files were "scraped from
+  publicly-available sources on the internet". Hence fingerprints only, private use only.
+- **Million Song Dataset** track metadata (`unique_tracks.txt`, artist and title only):
+  T. Bertin-Mahieux, D. P. W. Ellis, B. Whitman and P. Lamere, "The Million Song Dataset",
+  ISMIR 2011.
 
 ## Built-in seed library (13 melodies, from the prototype)
 

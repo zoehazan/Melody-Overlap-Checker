@@ -46,6 +46,29 @@ cd indexer && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t
 
 Which sources are used, which were skipped and why, and their credits: see `LICENSES.md`.
 
+## Build the private Lakh index
+
+A fingerprint index of the Lakh MIDI Dataset (LMD-matched: about 26,000 songs, mostly pop and
+rock from before 2015). The songs are copyrighted, so this index is **private, for personal use
+only**: it is never committed, uploaded or deployed. Build it in your own Codespace, so nothing
+large lands on your computer. From the repository root:
+
+```bash
+python3 indexer/build_lakh_index.py
+```
+
+- Downloads about 1.5 GB into `data/` (gitignored) and takes roughly 30-60 minutes.
+  Interrupted downloads resume when you run it again.
+- Writes `data/index/lakh-index.json.gz` (the index), `data/index/lakh-songs.tsv` (which MIDI
+  version was kept for each song) and `data/index/lakh-build-report.json` (counts only).
+- Deletes the downloaded MIDI archive when it finishes. No MIDI file is ever extracted to disk.
+- Refuses to write anywhere outside `data/`, and the web build refuses to run if a MIDI file or
+  index ever appears in `web/public/`.
+
+To use the index, download `data/index/lakh-index.json.gz` from the Codespace (right-click in
+the file explorer, then Download) and load it in the app with "Load reference index" (Phase 4).
+Dataset credit: Colin Raffel, Lakh MIDI Dataset (CC BY 4.0), and the Million Song Dataset.
+
 ## Layout
 
 ```
